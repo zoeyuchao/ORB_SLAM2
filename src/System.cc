@@ -30,8 +30,8 @@ namespace ORB_SLAM2
 {
 
 System::System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor,
-               const bool bUseViewer):mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)), mbReset(false),mbActivateLocalizationMode(false),
-        mbDeactivateLocalizationMode(false)
+               const bool bUseViewer, const bool bUseLocalMap, const bool bUseLoop, const bool bOnlyTracking):mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)),mpLocalMapper(static_cast<LocalMapping*>(NULL)),mpLoopCloser(static_cast<LoopClosing*>(NULL)), mbReset(false),mbActivateLocalizationMode(false),
+        mbDeactivateLocalizationMode(false), mbUseLocalMap(bUseLocalMap), mbUseLoop(bUseLoop),mbOnlyTracking(bOnlyTracking)
 {
     // Output welcome message
     cout << endl <<
@@ -57,6 +57,9 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
        exit(-1);
     }
 
+    cout << "Loop Mapping is set: " << mbUseLocalMap << endl;
+    cout << "Loop Closing is set: " << mbUseLoop << endl;
+    cout << "Only Track is set: " << mbOnlyTracking << endl;
 
     //Load ORB Vocabulary
     cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
@@ -84,33 +87,49 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
     mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer, mpMapDrawer,
-                             mpMap, mpKeyFrameDatabase, strSettingsFile, mSensor);
+                             mpMap, mpKeyFrameDatabase, strSettingsFile, mSensor, mbOnlyTracking);
 
     //Initialize the Local Mapping thread and launch
-    mpLocalMapper = new LocalMapping(mpMap, mSensor==MONOCULAR);
-    mptLocalMapping = new thread(&ORB_SLAM2::LocalMapping::Run,mpLocalMapper);
+    if (mbUseLocalMap)
+    {
+        mpLocalMapper = new LocalMapping(mpMap, mSensor==MONOCULAR);
+        mptLocalMapping = new thread(&ORB_SLAM2::LocalMapping::Run, mpLocalMapper);
+    }
 
     //Initialize the Loop Closing thread and launch
-    mpLoopCloser = new LoopClosing(mpMap, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR);
-    mptLoopClosing = new thread(&ORB_SLAM2::LoopClosing::Run, mpLoopCloser);
+    //zoe 20190511 关闭回环检测
+    if (mbUseLoop)
+    {   
+        //zoe 20181016
+        mpLoopCloser = new LoopClosing(mpMap, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR);
+        mptLoopClosing = new thread(&ORB_SLAM2::LoopClosing::Run, mpLoopCloser);
+    }
 
     //Initialize the Viewer thread and launch
     if(bUseViewer)
     {
-        mpViewer = new Viewer(this, mpFrameDrawer,mpMapDrawer,mpTracker,strSettingsFile);
+        mpViewer = new Viewer(this, mpFrameDrawer, mpMapDrawer, mpTracker, strSettingsFile, mbOnlyTracking);
         mptViewer = new thread(&Viewer::Run, mpViewer);
         mpTracker->SetViewer(mpViewer);
     }
 
     //Set pointers between threads
-    mpTracker->SetLocalMapper(mpLocalMapper);
-    mpTracker->SetLoopClosing(mpLoopCloser);
+    //zoe 20190512
+    if (mbUseLocalMap)
+    {
+        mpTracker->SetLocalMapper(mpLocalMapper);
+        mpLocalMapper->SetTracker(mpTracker);
+    }
 
-    mpLocalMapper->SetTracker(mpTracker);
-    mpLocalMapper->SetLoopCloser(mpLoopCloser);
+    //zoe 20190511
+    if (mbUseLoop)
+    {
+        mpTracker->SetLoopClosing(mpLoopCloser);   
+        mpLocalMapper->SetLoopCloser(mpLoopCloser);
+        mpLoopCloser->SetTracker(mpTracker);
+        mpLoopCloser->SetLocalMapper(mpLocalMapper);
 
-    mpLoopCloser->SetTracker(mpTracker);
-    mpLoopCloser->SetLocalMapper(mpLocalMapper);
+    }
 }
 
 cv::Mat System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp)
@@ -177,12 +196,15 @@ cv::Mat System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const doub
         unique_lock<mutex> lock(mMutexMode);
         if(mbActivateLocalizationMode)
         {
-            mpLocalMapper->RequestStop();
-
-            // Wait until Local Mapping has effectively stopped
-            while(!mpLocalMapper->isStopped())
+            if(mpLocalMapper)
             {
-                usleep(1000);
+                mpLocalMapper->RequestStop();
+
+                // Wait until Local Mapping has effectively stopped
+                while(!mpLocalMapper->isStopped())
+                {
+                    usleep(1000);
+                }
             }
 
             mpTracker->InformOnlyTracking(true);
@@ -191,7 +213,10 @@ cv::Mat System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const doub
         if(mbDeactivateLocalizationMode)
         {
             mpTracker->InformOnlyTracking(false);
-            mpLocalMapper->Release();
+            if (mpLocalMapper)
+            {
+                mpLocalMapper->Release();
+            }
             mbDeactivateLocalizationMode = false;
         }
     }
@@ -300,8 +325,10 @@ void System::Reset()
 
 void System::Shutdown()
 {
-    mpLocalMapper->RequestFinish();
-    mpLoopCloser->RequestFinish();
+    if (mpLocalMapper)
+        mpLocalMapper->RequestFinish();
+    if (mpLoopCloser)
+        mpLoopCloser->RequestFinish();
     if(mpViewer)
     {
         mpViewer->RequestFinish();
@@ -310,9 +337,20 @@ void System::Shutdown()
     }
 
     // Wait until all thread have effectively stopped
-    while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
+    if (mpLocalMapper)
     {
-        usleep(5000);
+        while(!mpLocalMapper->isFinished())
+        {
+            usleep(5000);
+        }
+    }
+
+    if (mpLoopCloser)
+    {
+        while(!mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
+        {
+            usleep(5000);
+        }
     }
 
     if(mpViewer)

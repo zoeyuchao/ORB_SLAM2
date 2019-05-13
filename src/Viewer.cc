@@ -1,7 +1,7 @@
 /**
 * This file is part of ORB-SLAM2.
 *
-* Copyright (C) 2014-2016 Raúl Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
+* Copyright (C) 2014-2016 Ra煤l Mur-Artal <raulmur at unizar dot es> (University of Zaragoza)
 * For more information see <https://github.com/raulmur/ORB_SLAM2>
 *
 * ORB-SLAM2 is free software: you can redistribute it and/or modify
@@ -26,8 +26,8 @@
 namespace ORB_SLAM2
 {
 
-Viewer::Viewer(System* pSystem, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Tracking *pTracking, const string &strSettingPath):
-    mpSystem(pSystem), mpFrameDrawer(pFrameDrawer),mpMapDrawer(pMapDrawer), mpTracker(pTracking),
+Viewer::Viewer(System* pSystem, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Tracking *pTracking, const string &strSettingPath, const bool bOnlyTracking):
+    mpSystem(pSystem), mpFrameDrawer(pFrameDrawer),mpMapDrawer(pMapDrawer), mpTracker(pTracking), mbOnlyTracking(bOnlyTracking),//zoe 20190513
     mbFinishRequested(false), mbFinished(true), mbStopped(true), mbStopRequested(false)
 {
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
@@ -71,6 +71,14 @@ void Viewer::Run()
     pangolin::Var<bool> menuShowKeyFrames("menu.Show KeyFrames",true,true);
     pangolin::Var<bool> menuShowGraph("menu.Show Graph",true,true);
     pangolin::Var<bool> menuLocalizationMode("menu.Localization Mode",false,true);
+    bool bLocalizationMode = false;
+    //zoe 20190513 
+    if (mbOnlyTracking)
+    {
+        menuLocalizationMode = true;
+        bLocalizationMode = true;
+    }
+     
     pangolin::Var<bool> menuReset("menu.Reset",false,false);
 
     // Define Camera Render Object (for view / scene browsing)
@@ -90,14 +98,13 @@ void Viewer::Run()
     cv::namedWindow("ORB-SLAM2: Current Frame");
 
     bool bFollow = true;
-    bool bLocalizationMode = false;
 
     while(1)
-    {
+    {        
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
+        
         mpMapDrawer->GetCurrentOpenGLCameraMatrix(Twc);
-
+        
         if(menuFollowCamera && bFollow)
         {
             s_cam.Follow(Twc);
@@ -123,7 +130,7 @@ void Viewer::Run()
             mpSystem->DeactivateLocalizationMode();
             bLocalizationMode = false;
         }
-
+        
         d_cam.Activate(s_cam);
         glClearColor(1.0f,1.0f,1.0f,1.0f);
         mpMapDrawer->DrawCurrentCamera(Twc);
@@ -131,28 +138,36 @@ void Viewer::Run()
             mpMapDrawer->DrawKeyFrames(menuShowKeyFrames,menuShowGraph);
         if(menuShowPoints)
             mpMapDrawer->DrawMapPoints();
-
+        
         pangolin::FinishFrame();
-
+        
         cv::Mat im = mpFrameDrawer->DrawFrame();
         cv::imshow("ORB-SLAM2: Current Frame",im);
-        cv::waitKey(mT);
-
+        cv::waitKey(mT);        
+        
         if(menuReset)
         {
             menuShowGraph = true;
             menuShowKeyFrames = true;
             menuShowPoints = true;
-            menuLocalizationMode = false;
-            if(bLocalizationMode)
+            //zoe 20190513 
+            if (mbOnlyTracking)
+                menuLocalizationMode = true;
+            else
+                menuLocalizationMode = false;
+            //zoe 20190513   
+            if(!menuLocalizationMode && bLocalizationMode)
+            {
                 mpSystem->DeactivateLocalizationMode();
-            bLocalizationMode = false;
+                bLocalizationMode = false;
+            }
+            
             bFollow = true;
             menuFollowCamera = true;
             mpSystem->Reset();
             menuReset = false;
         }
-
+        
         if(Stop())
         {
             while(isStopped())
@@ -160,7 +175,7 @@ void Viewer::Run()
                 usleep(3000);
             }
         }
-
+        
         if(CheckFinish())
             break;
     }

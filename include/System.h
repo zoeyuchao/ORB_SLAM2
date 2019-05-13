@@ -59,7 +59,7 @@ public:
 public:
 
     // Initialize the SLAM system. It launches the Local Mapping, Loop Closing and Viewer threads.
-    System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor, const bool bUseViewer = true);
+    System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor, const bool bUseViewer = true, const bool bUseLocalMap = true, const bool bUseLoop = true, const bool bOnlyTracking = false);
 
     // Proccess the given stereo frame. Images must be synchronized and rectified.
     // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
@@ -163,6 +163,11 @@ private:
     // Reset flag
     std::mutex mMutexReset;
     bool mbReset;
+    //zoe 20190511
+    bool mbUseLocalMap;
+    bool mbUseLoop;
+    // zoe 20190513
+    bool mbOnlyTracking;
 
     // Change mode flags
     std::mutex mMutexMode;

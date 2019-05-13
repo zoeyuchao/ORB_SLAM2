@@ -43,10 +43,10 @@ using namespace std;
 namespace ORB_SLAM2
 {
 
-Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Map *pMap, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor):
-    mState(NO_IMAGES_YET), mSensor(sensor), mbOnlyTracking(false), mbVO(false), mpORBVocabulary(pVoc),
+Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Map *pMap, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor, const bool bOnlyTracking):
+    mState(NO_IMAGES_YET), mSensor(sensor), mbOnlyTracking(bOnlyTracking), mbVO(false), mpORBVocabulary(pVoc),
     mpKeyFrameDB(pKFDB), mpInitializer(static_cast<Initializer*>(NULL)), mpSystem(pSys), mpViewer(NULL),
-    mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpMap(pMap), mnLastRelocFrameId(0)
+    mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpMap(pMap), mnLastRelocFrameId(0) //zoe 20190513 tracking参数赋值修改
 {
     // Load camera parameters from settings file
 
@@ -538,8 +538,10 @@ void Tracking::StereoInitialization()
         }
 
         cout << "New map created with " << mpMap->MapPointsInMap() << " points" << endl;
-
-        mpLocalMapper->InsertKeyFrame(pKFini);
+        if (mpLocalMapper)
+            mpLocalMapper->InsertKeyFrame(pKFini);
+        else
+            pKFini->ComputeBoW();
 
         mLastFrame = Frame(mCurrentFrame);
         mnLastKeyFrameId=mCurrentFrame.mnId;
@@ -711,9 +713,11 @@ void Tracking::CreateInitialMapMonocular()
             pMP->SetWorldPos(pMP->GetWorldPos()*invMedianDepth);
         }
     }
-
-    mpLocalMapper->InsertKeyFrame(pKFini);
-    mpLocalMapper->InsertKeyFrame(pKFcur);
+    if(mpLocalMapper)
+    {
+        mpLocalMapper->InsertKeyFrame(pKFini);
+        mpLocalMapper->InsertKeyFrame(pKFcur);
+    }
 
     mCurrentFrame.SetPose(pKFcur->GetPose());
     mnLastKeyFrameId=mCurrentFrame.mnId;
@@ -980,8 +984,11 @@ bool Tracking::NeedNewKeyFrame()
         return false;
 
     // If Local Mapping is freezed by a Loop Closure do not insert keyframes
-    if(mpLocalMapper->isStopped() || mpLocalMapper->stopRequested())
-        return false;
+    if(mpLocalMapper)
+    {
+        if(mpLocalMapper->isStopped() || mpLocalMapper->stopRequested())
+            return false;
+    }
 
     const int nKFs = mpMap->KeyFramesInMap();
 
@@ -996,7 +1003,11 @@ bool Tracking::NeedNewKeyFrame()
     int nRefMatches = mpReferenceKF->TrackedMapPoints(nMinObs);
 
     // Local Mapping accept keyframes?
-    bool bLocalMappingIdle = mpLocalMapper->AcceptKeyFrames();
+    bool bLocalMappingIdle = true;
+    if (mpLocalMapper)
+    {
+        bLocalMappingIdle = mpLocalMapper->AcceptKeyFrames();
+    }
 
     // Check how many "close" points are being tracked and how many could be potentially created.
     int nNonTrackedClose = 0;
@@ -1062,7 +1073,7 @@ bool Tracking::NeedNewKeyFrame()
 
 void Tracking::CreateNewKeyFrame()
 {
-    if(!mpLocalMapper->SetNotStop(true))
+    if(mpLocalMapper && !mpLocalMapper->SetNotStop(true))
         return;
 
     KeyFrame* pKF = new KeyFrame(mCurrentFrame,mpMap,mpKeyFrameDB);
@@ -1132,9 +1143,15 @@ void Tracking::CreateNewKeyFrame()
         }
     }
 
-    mpLocalMapper->InsertKeyFrame(pKF);
-
-    mpLocalMapper->SetNotStop(false);
+    if (mpLocalMapper)
+    {
+        mpLocalMapper->InsertKeyFrame(pKF);
+        mpLocalMapper->SetNotStop(false);
+    }
+    else
+    {
+        pKF->ComputeBoW();//zoe 20190513
+    }
 
     mnLastKeyFrameId = mCurrentFrame.mnId;
     mpLastKeyFrame = pKF;
@@ -1513,14 +1530,20 @@ void Tracking::Reset()
     }
 
     // Reset Local Mapping
-    cout << "Reseting Local Mapper...";
-    mpLocalMapper->RequestReset();
-    cout << " done" << endl;
+    if (mpLocalMapper)
+    {
+        cout << "Reseting Local Mapper...";
+        mpLocalMapper->RequestReset();
+        cout << " done" << endl;
+    }
 
     // Reset Loop Closing
-    cout << "Reseting Loop Closing...";
-    mpLoopClosing->RequestReset();
-    cout << " done" << endl;
+    if (mpLoopClosing)
+    {
+        cout << "Reseting Loop Closing...";
+        mpLoopClosing->RequestReset();
+        cout << " done" << endl;
+    }
 
     // Clear BoW Database
     cout << "Reseting Database...";

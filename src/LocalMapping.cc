@@ -83,8 +83,10 @@ void LocalMapping::Run()
                 // Check redundant local Keyframes
                 KeyFrameCulling();
             }
-
-            mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);
+            if (mpLoopCloser)
+            {
+                mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);   
+            }
         }
         else if(Stop())
         {
