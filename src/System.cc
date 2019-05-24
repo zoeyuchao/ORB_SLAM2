@@ -30,8 +30,8 @@ namespace ORB_SLAM2
 {
 
 System::System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor,
-               const bool bUseViewer, const bool bUseLocalMap, const bool bUseLoop, const bool bOnlyTracking):mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)),mpLocalMapper(static_cast<LocalMapping*>(NULL)),mpLoopCloser(static_cast<LoopClosing*>(NULL)), mbReset(false),mbActivateLocalizationMode(false),
-        mbDeactivateLocalizationMode(false), mbUseLocalMap(bUseLocalMap), mbUseLoop(bUseLoop),mbOnlyTracking(bOnlyTracking)
+               const bool bUseViewer, const bool bUseLocalMap, const bool bUseLoop, const bool bUseBoW, const bool bOnlyTracking):mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)),mpLocalMapper(static_cast<LocalMapping*>(NULL)),mpLoopCloser(static_cast<LoopClosing*>(NULL)), mbReset(false),mbActivateLocalizationMode(false),
+        mbDeactivateLocalizationMode(false), mbUseLocalMap(bUseLocalMap), mbUseLoop(bUseLoop), mbUseBoW(bUseBoW), mbOnlyTracking(bOnlyTracking)
 {
     // Output welcome message
     cout << endl <<
@@ -59,23 +59,8 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
 
     cout << "Loop Mapping is set: " << mbUseLocalMap << endl;
     cout << "Loop Closing is set: " << mbUseLoop << endl;
+    cout << "Use BoW is set: " << mbUseBoW << endl;
     cout << "Only Track is set: " << mbOnlyTracking << endl;
-
-    //Load ORB Vocabulary
-    cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
-
-    mpVocabulary = new ORBVocabulary();
-    bool bVocLoad = mpVocabulary->loadFromTextFile(strVocFile);
-    if(!bVocLoad)
-    {
-        cerr << "Wrong path to vocabulary. " << endl;
-        cerr << "Falied to open at: " << strVocFile << endl;
-        exit(-1);
-    }
-    cout << "Vocabulary loaded!" << endl << endl;
-
-    //Create KeyFrame Database
-    mpKeyFrameDatabase = new KeyFrameDatabase(*mpVocabulary);
 
     //Create the Map
     mpMap = new Map();
@@ -84,11 +69,35 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     mpFrameDrawer = new FrameDrawer(mpMap);
     mpMapDrawer = new MapDrawer(mpMap, strSettingsFile);
 
-    //Initialize the Tracking thread
-    //(it will live in the main thread of execution, the one that called this constructor)
-    mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer, mpMapDrawer,
+    if(mbUseBoW)
+    {
+        //Load ORB Vocabulary
+        cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
+
+        mpVocabulary = new ORBVocabulary();
+        bool bVocLoad = mpVocabulary->loadFromTextFile(strVocFile);
+        if(!bVocLoad)
+        {
+            cerr << "Wrong path to vocabulary. " << endl;
+            cerr << "Falied to open at: " << strVocFile << endl;
+            exit(-1);
+        }
+        cout << "Vocabulary loaded!" << endl << endl;
+
+        //Create KeyFrame Database
+        mpKeyFrameDatabase = new KeyFrameDatabase(*mpVocabulary);
+
+        mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer, mpMapDrawer,
                              mpMap, mpKeyFrameDatabase, strSettingsFile, mSensor, mbOnlyTracking);
 
+    }
+    else
+    {
+        mpTracker = new Tracking(this, mpFrameDrawer, mpMapDrawer,
+                             mpMap, strSettingsFile, mSensor, mbOnlyTracking);
+
+    }
+    
     //Initialize the Local Mapping thread and launch
     if (mbUseLocalMap)
     {
@@ -98,7 +107,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
 
     //Initialize the Loop Closing thread and launch
     //zoe 20190511 关闭回环检测
-    if (mbUseLoop)
+    if (mbUseBoW && mbUseLoop)
     {   
         //zoe 20181016
         mpLoopCloser = new LoopClosing(mpMap, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR);
@@ -122,7 +131,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     }
 
     //zoe 20190511
-    if (mbUseLoop)
+    if (mbUseBoW && mbUseLoop)
     {
         mpTracker->SetLoopClosing(mpLoopCloser);   
         mpLocalMapper->SetLoopCloser(mpLoopCloser);
